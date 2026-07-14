@@ -1,0 +1,11 @@
+.git
+.idea
+.vscode
+target
+logs
+dbdata
+ms-playwright
+*.log
+*.db
+*.db-shm
+*.db-wal

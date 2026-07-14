@@ -1,0 +1,11 @@
+ALTER TABLE xianyu_reply_template ADD COLUMN first_reply_on INTEGER DEFAULT 0;
+ALTER TABLE xianyu_reply_template ADD COLUMN first_reply_skip_manual_on INTEGER DEFAULT 0;
+ALTER TABLE xianyu_reply_template ADD COLUMN first_reply_text TEXT;
+ALTER TABLE xianyu_reply_template ADD COLUMN first_reply_image_url TEXT;
+ALTER TABLE xianyu_reply_template ADD COLUMN xianyu_auto_reply_on INTEGER DEFAULT 0;
+ALTER TABLE xianyu_reply_template ADD COLUMN xianyu_auto_reply_context_on INTEGER DEFAULT 1;
+ALTER TABLE xianyu_reply_template ADD COLUMN xianyu_keyword_reply_on INTEGER DEFAULT 1;
+ALTER TABLE xianyu_reply_template ADD COLUMN human_intervention_on INTEGER DEFAULT 0;
+ALTER TABLE xianyu_reply_template ADD COLUMN human_intervention_minutes INTEGER DEFAULT 10;
+ALTER TABLE xianyu_reply_template ADD COLUMN rag_delay_seconds INTEGER;
+ALTER TABLE xianyu_reply_template ADD COLUMN fixed_material TEXT;
