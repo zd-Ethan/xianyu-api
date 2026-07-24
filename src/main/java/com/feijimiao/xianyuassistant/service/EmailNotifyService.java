@@ -11,7 +11,22 @@ public interface EmailNotifyService {
      * @param accountId 闲鱼账号ID
      * @param accountNote 账号备注
      */
-    void sendWsDisconnectNotifyEmail(Long accountId, String accountNote);
+    void sendWsDisconnectNotifyEmail(Long accountId, String accountNote, Long notificationToken);
+
+    /**
+     * 在提交异步邮件前预占当前断连周期。
+     *
+     * @param accountId 闲鱼账号ID
+     * @return 当前周期令牌；返回null表示仍在防抖期内
+     */
+    Long reserveWsDisconnectNotify(Long accountId);
+
+    /**
+     * 连接恢复后清除该账号的断连通知防抖状态。
+     *
+     * @param accountId 闲鱼账号ID
+     */
+    void resetWsDisconnectNotifyState(Long accountId);
 
     /**
      * 检查WebSocket断开连接邮件通知是否启用

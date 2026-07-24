@@ -3,6 +3,7 @@ package com.feijimiao.xianyuassistant.service;
 import com.feijimiao.xianyuassistant.entity.XianyuGoodsOrder;
 import com.feijimiao.xianyuassistant.mapper.XianyuGoodsOrderMapper;
 import com.feijimiao.xianyuassistant.service.order.OrderStatus;
+import com.feijimiao.xianyuassistant.service.sales.LocalSalesFactService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -21,6 +22,9 @@ public class PendingOrderPollService {
     @Autowired
     private XianyuGoodsOrderMapper orderMapper;
 
+    @Autowired
+    private LocalSalesFactService localSalesFactService;
+
     @SuppressWarnings("unchecked")
     public int deliverPendingOrders(Long accountId) {
         List<Map<String, Object>> pendingOrders = orderService.queryPendingOrders(accountId);
@@ -31,6 +35,8 @@ public class PendingOrderPollService {
         int deliveryCount = 0;
         for (Map<String, Object> order : pendingOrders) {
             try {
+                localSalesFactService.recordSellerOrder(accountId, order);
+
                 Object commonDataObj = order.get("commonData");
                 if (!(commonDataObj instanceof Map)) continue;
                 Map<String, Object> commonData = (Map<String, Object>) commonDataObj;
@@ -89,6 +95,8 @@ public class PendingOrderPollService {
     public void syncOrdersToDb(Long accountId, List<Map<String, Object>> pendingOrders) {
         for (Map<String, Object> order : pendingOrders) {
             try {
+                localSalesFactService.recordSellerOrder(accountId, order);
+
                 Object commonDataObj = order.get("commonData");
                 if (!(commonDataObj instanceof Map)) continue;
                 Map<String, Object> commonData = (Map<String, Object>) commonDataObj;

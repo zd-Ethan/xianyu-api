@@ -11,7 +11,7 @@ import java.util.Map;
  */
 @Mapper
 public interface XianyuGoodsOrderMapper {
-    
+
     @Insert("INSERT INTO xianyu_goods_order (xianyu_account_id, xianyu_goods_id, xy_goods_id, pnm_id, order_id, order_status, buyer_user_id, buyer_user_name, sid, content, state, fail_reason, confirm_state, goods_title, sku_name, order_create_time, pay_success_time, consign_time, total_price, buy_num) " +
             "VALUES (#{xianyuAccountId}, #{xianyuGoodsId}, #{xyGoodsId}, #{pnmId}, #{orderId}, #{orderStatus}, #{buyerUserId}, #{buyerUserName}, #{sid}, #{content}, #{state}, #{failReason}, #{confirmState}, #{goodsTitle}, #{skuName}, #{orderCreateTime}, #{paySuccessTime}, #{consignTime}, #{totalPrice}, #{buyNum})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
@@ -255,24 +255,10 @@ public interface XianyuGoodsOrderMapper {
             "GROUP BY date(create_time)")
     List<Map<String, Object>> selectDeliveryTrendByDateRange(@Param("startDate") String startDate, @Param("endDate") String endDate);
 
-    @Select("SELECT COALESCE(SUM(CAST(total_price AS REAL)), 0) FROM xianyu_goods_order WHERE state = 1 AND confirm_state = 1")
-    double sumDeliverySuccessAmount();
-
     @Update("UPDATE xianyu_goods_order SET sku_name = #{skuName} WHERE id = #{id}")
     int updateSkuName(@Param("id") Long id, @Param("skuName") String skuName);
 
     @Update("UPDATE xianyu_goods_order SET buyer_user_name = #{buyerUserName}, order_create_time = #{orderCreateTime}, pay_success_time = #{paySuccessTime}, consign_time = #{consignTime}, sku_name = #{skuName}, goods_title = #{goodsTitle}, total_price = #{totalPrice}, buy_num = #{buyNum} WHERE id = #{id}")
     int updateOrderDetail(@Param("id") Long id, @Param("buyerUserName") String buyerUserName, @Param("orderCreateTime") String orderCreateTime, @Param("paySuccessTime") String paySuccessTime, @Param("consignTime") String consignTime, @Param("skuName") String skuName, @Param("goodsTitle") String goodsTitle, @Param("totalPrice") String totalPrice, @Param("buyNum") Integer buyNum);
 
-    @Select("SELECT COALESCE(SUM(CAST(total_price AS REAL)), 0) FROM xianyu_goods_order WHERE state = 1 AND confirm_state = 1 AND date(create_time) = #{date}")
-    double sumDeliverySuccessAmountByDate(@Param("date") String date);
-
-    @Select("SELECT COALESCE(SUM(CAST(total_price AS REAL)), 0) FROM xianyu_goods_order WHERE state = 1 AND confirm_state = 1 AND date(create_time) >= #{startDate} AND date(create_time) <= #{endDate}")
-    double sumDeliverySuccessAmountByDateRange(@Param("startDate") String startDate, @Param("endDate") String endDate);
-
-    @Select("SELECT date(create_time) AS date, COALESCE(SUM(CAST(total_price AS REAL)), 0) AS amount " +
-            "FROM xianyu_goods_order " +
-            "WHERE state = 1 AND confirm_state = 1 AND date(create_time) >= #{startDate} AND date(create_time) <= #{endDate} " +
-            "GROUP BY date(create_time)")
-    List<Map<String, Object>> sumDailyDeliverySuccessAmountByDateRange(@Param("startDate") String startDate, @Param("endDate") String endDate);
 }

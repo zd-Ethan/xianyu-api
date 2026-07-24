@@ -347,6 +347,11 @@ public class WebSocketServiceImpl implements WebSocketService {
                 
                 // 启动心跳任务
                 startHeartbeat(accountId, client);
+
+                // 一次断连周期在恢复连接后结束，后续再次掉线应立即重新通知。
+                if (emailNotifyService != null) {
+                    emailNotifyService.resetWsDisconnectNotifyState(accountId);
+                }
                 
                 log.info("WebSocket连接成功: accountId={}", accountId);
                 log.info("连接状态: isOpen={}, isClosed={}", 
@@ -968,7 +973,10 @@ public class WebSocketServiceImpl implements WebSocketService {
             } catch (Exception e) {
                 log.debug("获取账号备注失败: {}", e.getMessage());
             }
-            emailNotifyService.sendWsDisconnectNotifyEmail(accountId, accountNote);
+            Long notificationToken = emailNotifyService.reserveWsDisconnectNotify(accountId);
+            if (notificationToken != null) {
+                emailNotifyService.sendWsDisconnectNotifyEmail(accountId, accountNote, notificationToken);
+            }
         } catch (Exception e) {
             log.warn("触发WebSocket断开连接邮件通知异常: {}", e.getMessage());
         }

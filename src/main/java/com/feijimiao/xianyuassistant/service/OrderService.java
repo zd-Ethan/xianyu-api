@@ -3,6 +3,8 @@ package com.feijimiao.xianyuassistant.service;
 import java.util.List;
 import java.util.Map;
 
+import com.feijimiao.xianyuassistant.service.order.SellerOrderPage;
+
 /**
  * 订单服务接口
  */
@@ -44,6 +46,9 @@ public interface OrderService {
     List<Map<String, Object>> queryPendingOrders(Long accountId);
 
     List<Map<String, Object>> querySellerOrders(Long accountId, String queryCode, Integer pageNumber, Integer pageSize);
+
+    /** 查询卖家订单分页，并保留平台请求失败信息。 */
+    SellerOrderPage querySellerOrderPage(Long accountId, String queryCode, Integer pageNumber, Integer pageSize);
 
     Map<String, Object> getOrderDetailMap(Long accountId, String orderId);
 }

@@ -15,6 +15,7 @@ import java.util.Date;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 @Service
@@ -30,24 +31,28 @@ public class EmailNotifyServiceImpl implements EmailNotifyService {
     private static final String KEY_COOKIE_EXPIRE_NOTIFY_ENABLED = "email_notify_cookie_expire_enabled";
     private static final long ACCOUNT_NOTIFY_INTERVAL_MS = 10 * 60 * 1000L;
 
-    private final Map<Long, Long> lastWsDisconnectNotifyTimes = new ConcurrentHashMap<>();
+    private final Map<Long, WsDisconnectNotifyState> wsDisconnectNotifyStates = new ConcurrentHashMap<>();
     private final Map<Long, Long> lastCookieExpireNotifyTimes = new ConcurrentHashMap<>();
+    private final AtomicLong wsDisconnectNotifySequence = new AtomicLong();
 
     @Autowired
     private SysSettingService sysSettingService;
 
     @Override
     @Async
-    public void sendWsDisconnectNotifyEmail(Long accountId, String accountNote) {
+    public void sendWsDisconnectNotifyEmail(Long accountId, String accountNote, Long notificationToken) {
+        if (!isCurrentWsDisconnectNotify(accountId, notificationToken)) {
+            log.debug("WebSocket连接已恢复或断连周期已变化，跳过过期通知: accountId={}", accountId);
+            return;
+        }
         if (!isEmailConfigured()) {
             log.warn("邮箱未配置，跳过发送WebSocket断开连接通知邮件");
+            releaseWsDisconnectNotify(accountId, notificationToken);
             return;
         }
         if (!isWsDisconnectNotifyEnabled()) {
             log.debug("WebSocket断开连接邮件通知未启用，跳过");
-            return;
-        }
-        if (isAccountNotifyDebounced(lastWsDisconnectNotifyTimes, accountId, "WebSocket断开连接")) {
+            releaseWsDisconnectNotify(accountId, notificationToken);
             return;
         }
 
@@ -67,18 +72,63 @@ public class EmailNotifyServiceImpl implements EmailNotifyService {
             helper.setSubject(subject);
             helper.setText(content, true);
 
+            if (!isCurrentWsDisconnectNotify(accountId, notificationToken)) {
+                log.debug("WebSocket连接已恢复，取消发送断开连接通知: accountId={}", accountId);
+                return;
+            }
             mailSender.send(message);
             log.info("WebSocket断开连接通知邮件发送成功: accountId={}, to={}", accountId, to);
         } catch (Exception e) {
-            lastWsDisconnectNotifyTimes.remove(accountId);
+            releaseWsDisconnectNotify(accountId, notificationToken);
             log.error("WebSocket断开连接通知邮件发送失败: accountId={}", accountId, e);
         }
+    }
+
+    @Override
+    public synchronized Long reserveWsDisconnectNotify(Long accountId) {
+        if (accountId == null) {
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        WsDisconnectNotifyState state = wsDisconnectNotifyStates.get(accountId);
+        if (state != null && now - state.reservedAt() < ACCOUNT_NOTIFY_INTERVAL_MS) {
+            long remainingSeconds = (ACCOUNT_NOTIFY_INTERVAL_MS - (now - state.reservedAt())) / 1000;
+            log.info("WebSocket断开连接通知邮件防抖中，跳过本次发送: accountId={}, remaining={}秒",
+                    accountId, remainingSeconds);
+            return null;
+        }
+        long token = wsDisconnectNotifySequence.incrementAndGet();
+        wsDisconnectNotifyStates.put(accountId, new WsDisconnectNotifyState(token, now));
+        return token;
     }
 
     @Override
     public boolean isWsDisconnectNotifyEnabled() {
         String value = getSettingValue(KEY_WS_DISCONNECT_NOTIFY_ENABLED);
         return "1".equals(value) || "true".equalsIgnoreCase(value);
+    }
+
+    @Override
+    public synchronized void resetWsDisconnectNotifyState(Long accountId) {
+        if (accountId != null) {
+            wsDisconnectNotifyStates.remove(accountId);
+        }
+    }
+
+    private boolean isCurrentWsDisconnectNotify(Long accountId, Long notificationToken) {
+        if (accountId == null || notificationToken == null) {
+            return false;
+        }
+        WsDisconnectNotifyState state = wsDisconnectNotifyStates.get(accountId);
+        return state != null && state.token() == notificationToken;
+    }
+
+    private void releaseWsDisconnectNotify(Long accountId, Long notificationToken) {
+        if (accountId == null || notificationToken == null) {
+            return;
+        }
+        wsDisconnectNotifyStates.computeIfPresent(accountId, (ignored, state) ->
+                state.token() == notificationToken ? null : state);
     }
 
     @Override
@@ -285,6 +335,10 @@ public class EmailNotifyServiceImpl implements EmailNotifyService {
         }
         notifyTimes.put(accountId, now);
         return false;
+    }
+
+    /** WebSocket 断连邮件的预占状态。 */
+    private record WsDisconnectNotifyState(long token, long reservedAt) {
     }
 
     @Override

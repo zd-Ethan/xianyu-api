@@ -19,9 +19,12 @@ import com.feijimiao.xianyuassistant.service.delivery.DeliveryContext;
 import com.feijimiao.xianyuassistant.service.delivery.DeliveryStrategyResolver;
 import com.feijimiao.xianyuassistant.service.order.DeliveryLockManager;
 import com.feijimiao.xianyuassistant.service.order.OrderStatus;
+import com.feijimiao.xianyuassistant.service.order.SellerOrderPage;
+import com.feijimiao.xianyuassistant.service.sales.LocalSalesFactService;
 import com.feijimiao.xianyuassistant.utils.XianyuApiCallUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 /**
@@ -48,6 +51,10 @@ public class OrderServiceImpl implements OrderService {
 
     @Autowired
     private DeliveryLockManager deliveryLockManager;
+
+    @Autowired
+    @Lazy
+    private LocalSalesFactService localSalesFactService;
     
     private final ObjectMapper objectMapper = new ObjectMapper();
     
@@ -238,6 +245,7 @@ public class OrderServiceImpl implements OrderService {
                 return null;
             }
 
+            localSalesFactService.recordOrderDetail(accountId, orderId, responseData);
             String json = objectMapper.writeValueAsString(responseData);
             log.info("【账号{}】获取订单详情成功: orderId={}", accountId, orderId);
 
@@ -364,13 +372,19 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public List<Map<String, Object>> querySellerOrders(Long accountId, String queryCode, Integer pageNumber, Integer pageSize) {
+        SellerOrderPage page = querySellerOrderPage(accountId, queryCode, pageNumber, pageSize);
+        return page.success() ? page.items() : List.of();
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public SellerOrderPage querySellerOrderPage(Long accountId, String queryCode, Integer pageNumber, Integer pageSize) {
         try {
             String cookieStr = accountService.getCookieByAccountId(accountId);
             if (cookieStr == null || cookieStr.isEmpty()) {
                 log.error("【账号{}】未找到Cookie", accountId);
-                return List.of();
+                return SellerOrderPage.failed("账号 Cookie 不存在或已失效");
             }
 
             int safePageNumber = pageNumber != null && pageNumber > 0 ? pageNumber : 1;
@@ -404,24 +418,81 @@ public class OrderServiceImpl implements OrderService {
 
             if (!result.isSuccess()) {
                 log.warn("【账号{}】查询卖家订单失败: queryCode={}, error={}", accountId, safeQueryCode, result.getErrorMessage());
-                return List.of();
+                return SellerOrderPage.failed(result.getErrorMessage());
             }
 
             Map<String, Object> responseData = result.extractData();
             if (responseData == null) {
-                return List.of();
+                return SellerOrderPage.failed("平台订单响应为空");
             }
 
             Object moduleObj = responseData.get("module");
-            if (!(moduleObj instanceof Map)) return List.of();
+            if (!(moduleObj instanceof Map)) {
+                return SellerOrderPage.failed("平台订单响应缺少 module");
+            }
             Map<String, Object> module = (Map<String, Object>) moduleObj;
 
             Object itemsObj = module.get("items");
-            if (!(itemsObj instanceof List)) return List.of();
-            return (List<Map<String, Object>>) itemsObj;
+            if (itemsObj == null) {
+                return SellerOrderPage.failed("平台订单响应缺少 items");
+            }
+            if (!(itemsObj instanceof List)) {
+                return SellerOrderPage.failed("平台订单响应的 items 格式错误");
+            }
+
+            List<Map<String, Object>> items = (List<Map<String, Object>>) itemsObj;
+            return SellerOrderPage.success(items, resolveHasMore(module, safePageNumber, safePageSize, items.size()));
         } catch (Exception e) {
             log.error("【账号{}】查询卖家订单异常: queryCode={}", accountId, queryCode, e);
-            return List.of();
+            return SellerOrderPage.failed(e.getMessage() == null ? "查询卖家订单异常" : e.getMessage());
+        }
+    }
+
+    /** 根据平台分页字段判断是否还有下一页，缺失时退化为页大小判断。 */
+    boolean resolveHasMore(Map<String, Object> module, int pageNumber, int pageSize, int itemCount) {
+        for (String key : List.of("hasMore", "hasNext")) {
+            Object value = module.get(key);
+            if (value instanceof Boolean bool) {
+                return bool;
+            }
+            if (value != null) {
+                String normalizedValue = value.toString().trim();
+                if ("true".equalsIgnoreCase(normalizedValue) || "1".equals(normalizedValue)) {
+                    return true;
+                }
+                if ("false".equalsIgnoreCase(normalizedValue) || "0".equals(normalizedValue)) {
+                    return false;
+                }
+                throw new IllegalArgumentException("无法识别平台分页字段 " + key + ": " + normalizedValue);
+            }
+        }
+
+        for (String key : List.of("totalPage", "totalPages", "pageCount")) {
+            Integer totalPages = parsePositiveInteger(module.get(key));
+            if (totalPages != null) {
+                return pageNumber < totalPages;
+            }
+        }
+
+        Integer totalCount = parsePositiveInteger(module.get("totalCount"));
+        if (totalCount != null) {
+            return (long) pageNumber * pageSize < totalCount;
+        }
+        // 平台可能自行限制每页条数；无分页元数据时继续请求，直到返回空页。
+        return itemCount > 0;
+    }
+
+    private Integer parsePositiveInteger(Object value) {
+        if (value instanceof Number number) {
+            return Math.max(number.intValue(), 0);
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Math.max(Integer.parseInt(value.toString()), 0);
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 
@@ -448,7 +519,11 @@ public class OrderServiceImpl implements OrderService {
                 return null;
             }
 
-            return result.extractData();
+            Map<String, Object> responseData = result.extractData();
+            if (responseData != null) {
+                localSalesFactService.recordOrderDetail(accountId, orderId, responseData);
+            }
+            return responseData;
         } catch (Exception e) {
             log.warn("【账号{}】获取订单详情异常: orderId={}", accountId, orderId, e);
             return null;

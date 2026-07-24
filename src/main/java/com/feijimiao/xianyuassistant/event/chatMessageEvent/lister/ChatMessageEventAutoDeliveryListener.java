@@ -9,6 +9,7 @@ import com.feijimiao.xianyuassistant.mapper.XianyuGoodsOrderMapper;
 import com.feijimiao.xianyuassistant.mapper.XianyuGoodsInfoMapper;
 import com.feijimiao.xianyuassistant.service.AutoDeliveryService;
 import com.feijimiao.xianyuassistant.service.order.OrderStatus;
+import com.feijimiao.xianyuassistant.service.sales.LocalSalesFactService;
 import com.feijimiao.xianyuassistant.entity.XianyuGoodsConfig;
 import com.feijimiao.xianyuassistant.mapper.XianyuGoodsConfigMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +47,9 @@ public class ChatMessageEventAutoDeliveryListener {
     @Autowired
     private AutoDeliveryService autoDeliveryService;
 
+    @Autowired
+    private LocalSalesFactService localSalesFactService;
+
     @Async
     @EventListener
     public void handleChatMessageReceived(ChatMessageReceivedEvent event) {
@@ -60,6 +64,9 @@ public class ChatMessageEventAutoDeliveryListener {
             if (!isPaymentMessage(message)) {
                 return;
             }
+
+            localSalesFactService.recordPaymentMessage(
+                    accountId, message.getOrderId(), message.getXyGoodsId());
 
             if (message.getXyGoodsId() == null || message.getSId() == null) {
                 log.warn("【账号{}】消息缺少商品ID或会话ID，无法触发自动发货: pnmId={}", accountId, message.getPnmId());

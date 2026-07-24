@@ -14,6 +14,8 @@ import com.feijimiao.xianyuassistant.mapper.XianyuGoodsAutoDeliveryConfigMapper;
 import com.feijimiao.xianyuassistant.mapper.XianyuGoodsOrderMapper;
 import com.feijimiao.xianyuassistant.mapper.XianyuGoodsAutoReplyRecordMapper;
 import com.feijimiao.xianyuassistant.mapper.XianyuOperationLogMapper;
+import com.feijimiao.xianyuassistant.mapper.XianyuSalesOrderMapper;
+import com.feijimiao.xianyuassistant.mapper.XianyuSalesSyncStateMapper;
 import com.feijimiao.xianyuassistant.service.AccountService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,6 +62,12 @@ public class AccountServiceImpl implements AccountService {
     
     @Autowired
     private XianyuOperationLogMapper operationLogMapper;
+
+    @Autowired
+    private XianyuSalesOrderMapper salesOrderMapper;
+
+    @Autowired
+    private XianyuSalesSyncStateMapper salesSyncStateMapper;
     
     private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     
@@ -489,7 +497,13 @@ public class AccountServiceImpl implements AccountService {
             cookieQuery.eq(XianyuCookie::getXianyuAccountId, accountId);
             int cookieCount = cookieMapper.delete(cookieQuery);
             log.info("删除Cookie数据: accountId={}, 删除数量={}", accountId, cookieCount);
-            
+
+            // 9. 显式删除销售数据，避免 SQLite 外键配置异常时留下孤儿统计。
+            int salesOrderCount = salesOrderMapper.deleteByAccountId(accountId);
+            int salesSyncStateCount = salesSyncStateMapper.deleteByAccountId(accountId);
+            log.info("删除销售数据: accountId={}, 订单数量={}, 同步状态数量={}",
+                    accountId, salesOrderCount, salesSyncStateCount);
+
             // 10. 删除闲鱼账号表数据
             int accountCount = accountMapper.deleteById(accountId);
             log.info("删除账号数据: accountId={}, 删除数量={}", accountId, accountCount);

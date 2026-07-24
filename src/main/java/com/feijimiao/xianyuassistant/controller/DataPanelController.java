@@ -7,11 +7,14 @@ import com.feijimiao.xianyuassistant.controller.dto.DataPanelTrendRespDTO;
 import com.feijimiao.xianyuassistant.controller.dto.SalesRevenueRespDTO;
 import com.feijimiao.xianyuassistant.mapper.XianyuGoodsAutoReplyRecordMapper;
 import com.feijimiao.xianyuassistant.mapper.XianyuGoodsOrderMapper;
+import com.feijimiao.xianyuassistant.service.SalesStatisticsService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Clock;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,6 +37,12 @@ public class DataPanelController {
     @Autowired
     private CacheService cacheService;
 
+    @Autowired
+    private SalesStatisticsService salesStatisticsService;
+
+    @Autowired
+    private Clock salesClock;
+
     private static final long CACHE_TTL_MINUTES = 30;
 
     @PostMapping("/stats")
@@ -43,10 +52,10 @@ public class DataPanelController {
             if (req != null && req.getDate() != null && !req.getDate().isEmpty()) {
                 date = req.getDate();
             } else {
-                date = LocalDate.now().minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE);
+                date = LocalDate.now(salesClock).minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE);
             }
 
-            boolean isToday = date.equals(LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE));
+            boolean isToday = date.equals(LocalDate.now(salesClock).format(DateTimeFormatter.ISO_LOCAL_DATE));
             String cacheKey = "dataPanelStats:" + date;
 
             if (!isToday) {
@@ -78,7 +87,7 @@ public class DataPanelController {
     @PostMapping("/trend")
     public ResultObject<DataPanelTrendRespDTO> getDataPanelTrend() {
         try {
-            String cacheKey = "dataPanelTrend:" + LocalDate.now();
+            String cacheKey = "dataPanelTrend:" + LocalDate.now(salesClock);
             DataPanelTrendRespDTO cached = cacheService.get(cacheKey, DataPanelTrendRespDTO.class);
             if (cached != null) {
                 return ResultObject.success(cached);
@@ -90,7 +99,7 @@ public class DataPanelController {
             List<Integer> deliveryFail = new ArrayList<>();
             List<Integer> aiReplies = new ArrayList<>();
 
-            LocalDate today = LocalDate.now();
+            LocalDate today = LocalDate.now(salesClock);
             LocalDate startDate = today.minusDays(7);
             LocalDate endDate = today.minusDays(1);
             DateTimeFormatter fmt = DateTimeFormatter.ISO_LOCAL_DATE;
@@ -131,7 +140,9 @@ public class DataPanelController {
     @GetMapping("/realtimeRevenue")
     public ResultObject<Double> getRealtimeRevenue() {
         try {
-            double amount = orderMapper.sumDeliverySuccessAmount();
+            long amountCents = salesStatisticsService.getOverview(
+                    null, YearMonth.now(salesClock)).getTotalAmountCents();
+            double amount = amountCents / 100D;
             return ResultObject.success(amount);
         } catch (Exception e) {
             log.error("获取实时销售额失败", e);
@@ -158,7 +169,7 @@ public class DataPanelController {
             if (endDateStr != null && !endDateStr.isEmpty()) {
                 endDate = LocalDate.parse(endDateStr, fmt);
             } else {
-                endDate = LocalDate.now();
+                endDate = LocalDate.now(salesClock);
             }
 
             if (startDateStr != null && !startDateStr.isEmpty()) {
@@ -167,7 +178,7 @@ public class DataPanelController {
                 startDate = endDate.minusDays(9);
             }
 
-            boolean isToday = !endDate.isBefore(LocalDate.now());
+            boolean isToday = !endDate.isBefore(LocalDate.now(salesClock));
             String cacheKey = "salesRevenue:" + dimension + ":" + startDate + ":" + endDate;
 
             if (!isToday) {
@@ -212,48 +223,42 @@ public class DataPanelController {
     }
 
     private void buildDailyData(LocalDate startDate, LocalDate endDate, List<String> labels, List<Double> values) {
-        DateTimeFormatter fmt = DateTimeFormatter.ISO_LOCAL_DATE;
         DateTimeFormatter labelFmt = DateTimeFormatter.ofPattern("M/d");
-        Map<String, Map<String, Object>> amountMap = toDateRowMap(
-                orderMapper.sumDailyDeliverySuccessAmountByDateRange(startDate.format(fmt), endDate.format(fmt))
-        );
+        List<Long> dailyRevenue = salesStatisticsService.getDailyRevenueCents(null, startDate, endDate);
 
+        int index = 0;
         for (LocalDate d = startDate; !d.isAfter(endDate); d = d.plusDays(1)) {
-            String dateStr = d.format(fmt);
             labels.add(d.format(labelFmt));
-            values.add(toDouble(amountMap.get(dateStr), "amount"));
+            values.add(dailyRevenue.get(index++) / 100D);
         }
     }
 
     private void buildWeeklyData(LocalDate startDate, LocalDate endDate, List<String> labels, List<Double> values) {
-        DateTimeFormatter fmt = DateTimeFormatter.ISO_LOCAL_DATE;
         LocalDate weekStart = startDate;
         int weekNum = 1;
         while (!weekStart.isAfter(endDate)) {
             LocalDate weekEnd = weekStart.plusDays(6);
             if (weekEnd.isAfter(endDate)) weekEnd = endDate;
             labels.add("第" + weekNum + "周");
-            values.add(orderMapper.sumDeliverySuccessAmountByDateRange(weekStart.format(fmt), weekEnd.format(fmt)));
+            values.add(sumRevenue(weekStart, weekEnd));
             weekStart = weekEnd.plusDays(1);
             weekNum++;
         }
     }
 
     private void buildMonthlyData(LocalDate startDate, LocalDate endDate, List<String> labels, List<Double> values) {
-        DateTimeFormatter fmt = DateTimeFormatter.ISO_LOCAL_DATE;
         LocalDate monthStart = startDate.withDayOfMonth(1);
         while (!monthStart.isAfter(endDate)) {
             LocalDate monthEnd = monthStart.plusMonths(1).minusDays(1);
             if (monthEnd.isAfter(endDate)) monthEnd = endDate;
             if (monthStart.isBefore(startDate)) monthStart = startDate;
             labels.add(monthStart.getYear() + "/" + monthStart.getMonthValue());
-            values.add(orderMapper.sumDeliverySuccessAmountByDateRange(monthStart.format(fmt), monthEnd.format(fmt)));
+            values.add(sumRevenue(monthStart, monthEnd));
             monthStart = monthStart.plusMonths(1).withDayOfMonth(1);
         }
     }
 
     private void buildQuarterlyData(LocalDate startDate, LocalDate endDate, List<String> labels, List<Double> values) {
-        DateTimeFormatter fmt = DateTimeFormatter.ISO_LOCAL_DATE;
         int startQuarter = (startDate.getMonthValue() - 1) / 3 + 1;
         LocalDate quarterStart = startDate.withMonth((startQuarter - 1) * 3 + 1).withDayOfMonth(1);
         while (!quarterStart.isAfter(endDate)) {
@@ -262,7 +267,7 @@ public class DataPanelController {
             if (quarterEnd.isAfter(endDate)) quarterEnd = endDate;
             LocalDate actualStart = quarterStart.isBefore(startDate) ? startDate : quarterStart;
             labels.add(quarterStart.getYear() + "Q" + quarter);
-            values.add(orderMapper.sumDeliverySuccessAmountByDateRange(actualStart.format(fmt), quarterEnd.format(fmt)));
+            values.add(sumRevenue(actualStart, quarterEnd));
             quarterStart = quarterStart.plusMonths(3);
         }
     }
@@ -272,6 +277,14 @@ public class DataPanelController {
         private String dimension;
         private String startDate;
         private String endDate;
+    }
+
+    private double sumRevenue(LocalDate startDate, LocalDate endDate) {
+        long amountCents = salesStatisticsService.getDailyRevenueCents(null, startDate, endDate)
+                .stream()
+                .mapToLong(Long::longValue)
+                .sum();
+        return amountCents / 100D;
     }
 
     private Map<String, Map<String, Object>> toDateRowMap(List<Map<String, Object>> rows) {
@@ -301,21 +314,6 @@ public class DataPanelController {
             return Integer.parseInt(value.toString());
         } catch (NumberFormatException e) {
             return 0;
-        }
-    }
-
-    private double toDouble(Map<String, Object> row, String key) {
-        Object value = getValue(row, key);
-        if (value instanceof Number) {
-            return ((Number) value).doubleValue();
-        }
-        if (value == null) {
-            return 0D;
-        }
-        try {
-            return Double.parseDouble(value.toString());
-        } catch (NumberFormatException e) {
-            return 0D;
         }
     }
 
